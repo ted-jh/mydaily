@@ -1,19 +1,19 @@
 {
-  "_updated": null,
+  "_updated": "2026-09-14 21:04",
   "005930": {
     "name": "삼성전자",
-    "price": null
+    "price": 249000.0
   },
   "000660": {
     "name": "SK하이닉스",
-    "price": null
+    "price": 1697000.0
   },
   "005380": {
     "name": "현대차",
-    "price": null
+    "price": 371500.0
   },
   "009150": {
     "name": "삼성전기",
-    "price": null
+    "price": 1337000.0
   }
 }
