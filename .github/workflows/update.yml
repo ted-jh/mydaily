@@ -11,65 +11,150 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fetch previous-close data
+      - name: Fetch KRX daily prices
+        env:
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
         shell: bash
         run: |
           python - <<'PY'
-          import json, urllib.request, datetime, time
+          import json
+          import os
+          import datetime as dt
+          import urllib.request
           from pathlib import Path
 
-          tickers = json.loads(Path("tickers.json").read_text(encoding="utf-8"))
-          out = {"_updated": datetime.datetime.now(datetime.timezone.utc).astimezone(datetime.timezone(datetime.timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")}
+          auth = os.environ.get("KRX_AUTH_KEY", "").strip()
+          if not auth:
+              raise SystemExit("KRX_AUTH_KEY secret is missing.")
 
-          def fetch(symbol):
-              url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=10d&interval=1d"
-              req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
-              with urllib.request.urlopen(req, timeout=20) as r:
+          tickers = json.loads(Path("tickers.json").read_text(encoding="utf-8"))
+          if not isinstance(tickers, dict):
+              raise SystemExit("tickers.json must be a JSON object.")
+
+          wanted = {}
+          for code, fallback_name in tickers.items():
+              code = str(code).strip().upper()
+              if len(code) == 6 and code.isalnum():
+                  wanted[code] = str(fallback_name or "")
+
+          if not wanted:
+              raise SystemExit("No valid 6-character ticker codes.")
+
+          # KRX Open API endpoints
+          endpoints = [
+              ("KOSPI", "https://data-dbg.krx.co.kr/svc/apis/sto/stk_bydd_trd"),
+              ("KOSDAQ", "https://data-dbg.krx.co.kr/svc/apis/sto/ksq_bydd_trd"),
+              ("ETF", "https://data-dbg.krx.co.kr/svc/apis/etp/etf_bydd_trd"),
+          ]
+
+          def number(v):
+              if v is None:
+                  return None
+              s = str(v).replace(",", "").strip()
+              if not s or s in ("-", "—"):
+                  return None
+              try:
+                  return float(s) if "." in s else int(s)
+              except ValueError:
+                  return None
+
+          def fetch(endpoint, date):
+              req = urllib.request.Request(
+                  endpoint + "?basDd=" + date,
+                  headers={
+                      "AUTH_KEY": auth,
+                      "Accept": "application/json",
+                      "User-Agent": "Mozilla/5.0",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as r:
                   return json.load(r)
 
-          for code, fallback_name in tickers.items():
-              if not (isinstance(code,str) and len(code)==6 and code.isdigit()):
-                  continue
-              found = None
-              for suffix in (".KS",".KQ"):
-                  try:
-                      j=fetch(code+suffix)
-                      res=j["chart"]["result"][0]
-                      ts=res.get("timestamp") or []
-                      q=res["indicators"]["quote"][0]
-                      closes=q.get("close") or []
-                      pairs=[(t,c) for t,c in zip(ts,closes) if c is not None]
-                      if pairs:
-                          found=pairs[-1][1]
-                          break
-                  except Exception:
-                      pass
-              if found is not None:
-                  out[code]={"name":fallback_name,"price":found}
-              else:
-                  # Keep an existing value if this run cannot fetch it.
-                  old={}
-                  p=Path("prices.json")
-                  if p.exists():
-                      try: old=json.loads(p.read_text(encoding="utf-8"))
-                      except Exception: pass
-                  if code in old:
-                      out[code]=old[code]
-                  else:
-                      out[code]={"name":fallback_name,"price":None}
-              time.sleep(0.3)
+          remaining = set(wanted)
+          found = {}
 
-          Path("prices.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+          # Look back up to 10 calendar days to skip weekends/holidays.
+          today = dt.date.today()
+          for n in range(10):
+              if not remaining:
+                  break
+              date = (today - dt.timedelta(days=n)).strftime("%Y%m%d")
+
+              for market, endpoint in endpoints:
+                  try:
+                      data = fetch(endpoint, date)
+                      rows = data.get("OutBlock_1", [])
+                      if isinstance(rows, dict):
+                          rows = [rows]
+
+                      for row in rows:
+                          code = str(row.get("ISU_CD", "")).strip().upper()
+                          if code not in remaining:
+                              continue
+
+                          price = number(row.get("TDD_CLSPRC"))
+                          if price is None:
+                              continue
+
+                          found[code] = {
+                              "name": str(row.get("ISU_NM", "")).strip() or wanted[code],
+                              "price": price,
+                              "date": row.get("BAS_DD", date),
+                              "market": market
+                          }
+                          remaining.remove(code)
+
+                  except Exception as e:
+                      print(f"{market} {date}: {e}")
+
+          old = {}
+          old_path = Path("prices.json")
+          if old_path.exists():
+              try:
+                  old = json.loads(old_path.read_text(encoding="utf-8"))
+              except Exception:
+                  pass
+
+          now = dt.datetime.now(
+              dt.timezone.utc
+          ).astimezone(
+              dt.timezone(dt.timedelta(hours=9))
+          )
+
+          out = {"_updated": now.strftime("%Y-%m-%d %H:%M")}
+
+          for code, fallback_name in wanted.items():
+              if code in found:
+                  out[code] = found[code]
+              elif code in old:
+                  out[code] = old[code]
+              else:
+                  out[code] = {
+                      "name": fallback_name,
+                      "price": None,
+                      "date": None,
+                      "market": None
+                  }
+
+          Path("prices.json").write_text(
+              json.dumps(out, ensure_ascii=False, indent=2),
+              encoding="utf-8"
+          )
+
+          print(f"Found {len(found)} / {len(wanted)} tickers.")
+          if remaining:
+              print("Not found:", ", ".join(sorted(remaining)))
           PY
 
-      - name: Commit
+      - name: Commit updated prices
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add prices.json
-          git diff --cached --quiet || git commit -m "Update daily data"
+          git diff --cached --quiet || git commit -m "Update KRX daily prices"
           git push
