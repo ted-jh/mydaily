@@ -15,51 +15,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Update embedded prices
+      - name: Update prices.json
         env:
           TZ: Asia/Seoul
         run: |
           python - <<'PY'
-          import json, re, urllib.request, datetime, time
+          import json, datetime, time, urllib.request, re
           from pathlib import Path
 
           tickers = json.loads(Path("tickers.json").read_text())["tickers"]
           prices = {}
 
           def get(url):
-              req=urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0 (compatible; DailyPage/1.0)"})
-              with urllib.request.urlopen(req, timeout=20) as r:
-                  return r.read().decode("utf-8","ignore")
+              req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return r.read().decode("utf-8", "ignore")
 
           for code in tickers:
-              html=get(f"https://finance.naver.com/item/main.naver?code={code}")
-              m=re.search(r'<h2[^>]*>\s*<a[^>]*>(.*?)</a>',html,re.S)
-              name=re.sub(r'<.*?>','',m.group(1)).strip() if m else code
-              m=re.search(r'<th[^>]*>\s*전일\s*</th>\s*<td[^>]*>\s*.*?<span[^>]*>([0-9,]+)</span>',html,re.S)
-              if not m:
-                  m=re.search(r'<th[^>]*>\s*전일\s*</th>\s*<td[^>]*>(.*?)</td>',html,re.S)
-              if not m:
-                  print("FAIL",code,name)
-                  continue
-              close=re.sub(r'[^0-9]','',re.sub(r'<.*?>','',m.group(1)))
-              if close:
-                  prices[code]={"name":name,"close":int(close)}
+              # Naver Finance page: name + previous/closing price.
+              html = get(f"https://finance.naver.com/item/main.naver?code={code}")
+              m = re.search(r'<h2[^>]*>\s*<a[^>]*>(.*?)</a>', html, re.S)
+              name = re.sub(r'<.*?>','',m.group(1)).strip() if m else code
+
+              # Try several patterns because page markup can change.
+              close = None
+              patterns = [
+                  r'<th[^>]*>\s*전일\s*</th>\s*<td[^>]*>.*?<span[^>]*>([0-9,]+)</span>',
+                  r'<th[^>]*>\s*종가\s*</th>\s*<td[^>]*>.*?<span[^>]*>([0-9,]+)</span>'
+              ]
+              for p in patterns:
+                  mm = re.search(p, html, re.S)
+                  if mm:
+                      close = int(mm.group(1).replace(',',''))
+                      break
+              if close is not None:
+                  prices[code] = {"name":name,"close":close}
+              else:
+                  print("FAIL", code, name)
               time.sleep(0.5)
 
           if not prices:
               raise SystemExit("No prices retrieved")
 
-          now=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
-          data={"asof":now.strftime("%Y-%m-%d"),"updated_at":now.strftime("%Y-%m-%d %H:%M KST"),"prices":prices}
-          text=Path("index.html").read_text()
-          text=re.sub(r'let data=\{.*?\};', 'let data='+json.dumps(data,ensure_ascii=False,separators=(",",":"))+';', text, count=1, flags=re.S)
-          Path("index.html").write_text(text)
+          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+          data = {
+              "asof": now.strftime("%Y-%m-%d"),
+              "updated_at": now.strftime("%Y-%m-%d %H:%M KST"),
+              "prices": prices
+          }
+          Path("prices.json").write_text(json.dumps(data, ensure_ascii=False, indent=2)+"\n")
           PY
 
-      - name: Commit updated page
+      - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html
+          git add prices.json
           git diff --cached --quiet || git commit -m "Update daily prices"
           git push
