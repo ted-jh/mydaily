@@ -1,4 +1,4 @@
-name: Update prices
+name: update-data
 
 on:
   workflow_dispatch:
@@ -15,61 +15,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Update prices.json
-        env:
-          TZ: Asia/Seoul
+      - name: Fetch previous-close data
+        shell: bash
         run: |
           python - <<'PY'
-          import json, datetime, time, urllib.request, re
+          import json, urllib.request, datetime, time
           from pathlib import Path
 
-          tickers = json.loads(Path("tickers.json").read_text())["tickers"]
-          prices = {}
+          tickers = json.loads(Path("tickers.json").read_text(encoding="utf-8"))
+          out = {"_updated": datetime.datetime.now(datetime.timezone.utc).astimezone(datetime.timezone(datetime.timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")}
 
-          def get(url):
+          def fetch(symbol):
+              url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=10d&interval=1d"
               req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
-              with urllib.request.urlopen(req, timeout=30) as r:
-                  return r.read().decode("utf-8", "ignore")
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  return json.load(r)
 
-          for code in tickers:
-              # Naver Finance page: name + previous/closing price.
-              html = get(f"https://finance.naver.com/item/main.naver?code={code}")
-              m = re.search(r'<h2[^>]*>\s*<a[^>]*>(.*?)</a>', html, re.S)
-              name = re.sub(r'<.*?>','',m.group(1)).strip() if m else code
-
-              # Try several patterns because page markup can change.
-              close = None
-              patterns = [
-                  r'<th[^>]*>\s*전일\s*</th>\s*<td[^>]*>.*?<span[^>]*>([0-9,]+)</span>',
-                  r'<th[^>]*>\s*종가\s*</th>\s*<td[^>]*>.*?<span[^>]*>([0-9,]+)</span>'
-              ]
-              for p in patterns:
-                  mm = re.search(p, html, re.S)
-                  if mm:
-                      close = int(mm.group(1).replace(',',''))
-                      break
-              if close is not None:
-                  prices[code] = {"name":name,"close":close}
+          for code, fallback_name in tickers.items():
+              if not (isinstance(code,str) and len(code)==6 and code.isdigit()):
+                  continue
+              found = None
+              for suffix in (".KS",".KQ"):
+                  try:
+                      j=fetch(code+suffix)
+                      res=j["chart"]["result"][0]
+                      ts=res.get("timestamp") or []
+                      q=res["indicators"]["quote"][0]
+                      closes=q.get("close") or []
+                      pairs=[(t,c) for t,c in zip(ts,closes) if c is not None]
+                      if pairs:
+                          found=pairs[-1][1]
+                          break
+                  except Exception:
+                      pass
+              if found is not None:
+                  out[code]={"name":fallback_name,"price":found}
               else:
-                  print("FAIL", code, name)
-              time.sleep(0.5)
+                  # Keep an existing value if this run cannot fetch it.
+                  old={}
+                  p=Path("prices.json")
+                  if p.exists():
+                      try: old=json.loads(p.read_text(encoding="utf-8"))
+                      except Exception: pass
+                  if code in old:
+                      out[code]=old[code]
+                  else:
+                      out[code]={"name":fallback_name,"price":None}
+              time.sleep(0.3)
 
-          if not prices:
-              raise SystemExit("No prices retrieved")
-
-          now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
-          data = {
-              "asof": now.strftime("%Y-%m-%d"),
-              "updated_at": now.strftime("%Y-%m-%d %H:%M KST"),
-              "prices": prices
-          }
-          Path("prices.json").write_text(json.dumps(data, ensure_ascii=False, indent=2)+"\n")
+          Path("prices.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
           PY
 
-      - name: Commit updated data
+      - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add prices.json
-          git diff --cached --quiet || git commit -m "Update daily prices"
+          git diff --cached --quiet || git commit -m "Update daily data"
           git push
