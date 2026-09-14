@@ -18,61 +18,76 @@ table{width:100%;border-collapse:collapse}th,td{padding:11px 8px;border-bottom:1
 <div class="sub" id="asof">데이터 불러오는 중…</div>
 <form id="form">
   <input id="ticker" inputmode="numeric" maxlength="6" placeholder="종목번호 6자리 (예: 005930)">
-  <button>추가</button>
+  <button type="submit">추가</button>
 </form>
-<table><thead><tr><th>종목</th><th class="num">전 거래일 종가</th></tr></thead>
+<table><thead><tr><th>종목</th><th class="num">최근 종가</th></tr></thead>
 <tbody id="rows"></tbody></table>
-<div class="small">종목번호는 6자리 숫자를 입력하세요. 추가한 종목은 이 브라우저에만 저장됩니다.</div>
+<div class="small">종목번호를 입력하면 최근 거래일 종가를 조회합니다. 추가한 종목은 이 브라우저에 저장됩니다.</div>
+
 <script>
-const KEY='daily_tickers_v1';
-let data={"asof":"","updated_at":"","prices":{}};
+const KEY='daily_tickers_v2';
+const DATA_URL='./prices.json?t='+Date.now();
+let data={asof:'',updated_at:'',prices:{}};
 
 function getLocal(){
-  try { return JSON.parse(localStorage.getItem(KEY)||'[]'); } catch(e){ return []; }
+  try{return JSON.parse(localStorage.getItem(KEY)||'[]');}catch(e){return [];}
 }
 function setLocal(a){localStorage.setItem(KEY,JSON.stringify(a));}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 
 async function load(){
-  render();
+  try{
+    const r=await fetch(DATA_URL,{cache:'no-store'});
+    if(!r.ok) throw new Error('prices.json '+r.status);
+    data=await r.json();
+    render();
+  }catch(e){
+    document.getElementById('asof').textContent='기본 데이터 연결 실패';
+    render();
+  }
 }
+
 async function fetchImmediate(code){
-  const symbol=code + '.KS';
+  // Browser CORS 문제를 피하기 위해 일반적인 웹 프록시를 통해 Yahoo의 일봉 JSON을 읽습니다.
+  const target='https://query1.finance.yahoo.com/v8/finance/chart/'+code+'.KS?range=10d&interval=1d';
   const urls=[
-    'https://query1.finance.yahoo.com/v8/finance/chart/'+symbol+'?range=5d&interval=1d',
-    'https://query2.finance.yahoo.com/v8/finance/chart/'+symbol+'?range=5d&interval=1d'
+    'https://r.jina.ai/'+target,
+    'https://r.jina.ai/http://query1.finance.yahoo.com/v8/finance/chart/'+code+'.KS?range=10d&interval=1d'
   ];
   for(const url of urls){
     try{
       const r=await fetch(url,{cache:'no-store'});
       if(!r.ok) continue;
-      const j=await r.json();
+      const raw=await r.text();
+      let j;
+      try{j=JSON.parse(raw);}catch(e){
+        const start=raw.indexOf('{'); const end=raw.lastIndexOf('}');
+        if(start<0||end<=start) continue;
+        j=JSON.parse(raw.slice(start,end+1));
+      }
       const q=j?.chart?.result?.[0];
-      const ts=q?.timestamp||[], c=q?.indicators?.quote?.[0]?.close||[];
+      const ts=q?.timestamp||[];
+      const c=q?.indicators?.quote?.[0]?.close||[];
       let i=c.length-1;
       while(i>=0 && (c[i]==null || !ts[i])) i--;
-      if(i>=0){
-        // Yahoo's latest daily candle is normally the latest trading day.
-        // For an in-session day, use the previous completed daily candle.
-        const todayKst=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-        const d=new Date(ts[i]*1000);
-        const dateKst=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
-        let chosen=i;
-        if(dateKst===todayKst && i>0) chosen=i-1;
-        const close=c[chosen];
-        const name=q.meta?.longName || q.meta?.shortName || code;
-        data.prices=data.prices||{};
-        data.prices[code]={name,close:Math.round(close)};
-        data.asof=dateKst;
-        render();
-        return true;
-      }
-    }catch(e){}
+      if(i<0) continue;
+      const close=c[i];
+      const d=new Date(ts[i]*1000);
+      const dateKst=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+      const name=q?.meta?.longName || q?.meta?.shortName || code;
+      data.prices=data.prices||{};
+      data.prices[code]={name:name,close:Math.round(close),asof:dateKst};
+      render();
+      return true;
+    }catch(e){
+      console.log('lookup failed',e);
+    }
   }
   return false;
 }
 
 function render(){
-  const symbols=getLocal().length?getLocal():Object.keys(data.prices||{});
+  const symbols=getLocal();
   const rows=document.getElementById('rows');
   rows.innerHTML='';
   symbols.forEach(s=>{
@@ -80,24 +95,37 @@ function render(){
     const tr=document.createElement('tr');
     const name=x?.name || s;
     const close=x?.close;
+    const asof=x?.asof || data.asof || '';
     tr.innerHTML='<td>'+escapeHtml(name)+' <span style="color:#999;font-size:12px">('+s+')</span></td>'+
-      '<td class="num">'+(close==null?'—':Number(close).toLocaleString('ko-KR')+'원')+'</td>';
+      '<td class="num">'+(close==null?'조회 중…':Number(close).toLocaleString('ko-KR')+'원')+ (asof?'<div style="font-size:11px;color:#aaa">'+escapeHtml(asof)+'</div>':'')+'</td>';
     rows.appendChild(tr);
   });
-  document.getElementById('asof').textContent=
-    data.asof ? ('기준일: '+data.asof+' · 마지막 자동갱신: '+(data.updated_at||'')) : '데이터 준비 중';
+  if(data.asof){
+    document.getElementById('asof').textContent='자동 갱신 기준일: '+data.asof+(data.updated_at?' · '+data.updated_at:'');
+  }else{
+    document.getElementById('asof').textContent=symbols.length?'종목별 데이터를 확인하는 중…':'종목번호를 입력해 주세요.';
+  }
 }
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
-document.getElementById('form').addEventListener('submit',e=>{
+
+document.getElementById('form').addEventListener('submit',async e=>{
   e.preventDefault();
-  const s=document.getElementById('ticker').value.trim();
+  const input=document.getElementById('ticker');
+  const s=input.value.trim();
   if(!/^\d{6}$/.test(s)){alert('6자리 종목번호를 입력하세요.');return;}
-  const a=getLocal(); if(!a.includes(s)) a.push(s); setLocal(a);
-  document.getElementById('ticker').value='';
+  const a=getLocal();
+  if(!a.includes(s)) a.push(s);
+  setLocal(a);
+  input.value='';
+  if(!data.prices) data.prices={};
+  data.prices[s]={name:s,close:null};
   render();
   const ok=await fetchImmediate(s);
-  if(!ok) alert('즉시 조회에 실패했습니다. 다음 자동 갱신 때 다시 시도합니다.');
+  if(!ok){
+    // 다음 자동 갱신에서 받아올 수 있도록 목록에는 남겨 둡니다.
+    alert('즉시 조회에 실패했습니다. 네트워크에서 외부 데이터 요청을 막았을 수 있습니다. 종목은 저장되었으며 다음 자동 갱신 때 다시 시도합니다.');
+  }
 });
+
 load();
 </script>
 </body>
