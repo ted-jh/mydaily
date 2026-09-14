@@ -1,5 +1,19 @@
 {
-  "asof": "",
-  "updated_at": "",
-  "prices": {}
+  "_updated": null,
+  "005930": {
+    "name": "삼성전자",
+    "price": null
+  },
+  "000660": {
+    "name": "SK하이닉스",
+    "price": null
+  },
+  "005380": {
+    "name": "현대차",
+    "price": null
+  },
+  "009150": {
+    "name": "삼성전기",
+    "price": null
+  }
 }
