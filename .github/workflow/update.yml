@@ -1,0 +1,65 @@
+name: Update prices
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 7 * * 1-5"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update embedded prices
+        env:
+          TZ: Asia/Seoul
+        run: |
+          python - <<'PY'
+          import json, re, urllib.request, datetime, time
+          from pathlib import Path
+
+          tickers = json.loads(Path("tickers.json").read_text())["tickers"]
+          prices = {}
+
+          def get(url):
+              req=urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0 (compatible; DailyPage/1.0)"})
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  return r.read().decode("utf-8","ignore")
+
+          for code in tickers:
+              html=get(f"https://finance.naver.com/item/main.naver?code={code}")
+              m=re.search(r'<h2[^>]*>\s*<a[^>]*>(.*?)</a>',html,re.S)
+              name=re.sub(r'<.*?>','',m.group(1)).strip() if m else code
+              m=re.search(r'<th[^>]*>\s*전일\s*</th>\s*<td[^>]*>\s*.*?<span[^>]*>([0-9,]+)</span>',html,re.S)
+              if not m:
+                  m=re.search(r'<th[^>]*>\s*전일\s*</th>\s*<td[^>]*>(.*?)</td>',html,re.S)
+              if not m:
+                  print("FAIL",code,name)
+                  continue
+              close=re.sub(r'[^0-9]','',re.sub(r'<.*?>','',m.group(1)))
+              if close:
+                  prices[code]={"name":name,"close":int(close)}
+              time.sleep(0.5)
+
+          if not prices:
+              raise SystemExit("No prices retrieved")
+
+          now=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+          data={"asof":now.strftime("%Y-%m-%d"),"updated_at":now.strftime("%Y-%m-%d %H:%M KST"),"prices":prices}
+          text=Path("index.html").read_text()
+          text=re.sub(r'let data=\{.*?\};', 'let data='+json.dumps(data,ensure_ascii=False,separators=(",",":"))+';', text, count=1, flags=re.S)
+          Path("index.html").write_text(text)
+          PY
+
+      - name: Commit updated page
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || git commit -m "Update daily prices"
+          git push
