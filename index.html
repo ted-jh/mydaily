@@ -17,59 +17,94 @@
 <main id="app" class="mx-auto max-w-5xl p-6"></main>
 <script>
 /* =========================================================
-   주식 종가 뷰어 (읽기 전용)
-   - tickers.json : 종목 목록 (코드 → 이름) — GitHub에서 수동 관리
-   - prices.json  : KRX 종가 (update.yml이 평일 자동 갱신)
-   - localStorage 의존 없음 → 어디서 접속해도 동일 화면
+   주식 종가 뷰어 + 종목 추가 (GitHub Pages)
+   - 표시: raw.githubusercontent.com 에서 tickers.json / prices.json 읽기
+     (Pages 배포 지연 없이 커밋 즉시 반영)
+   - 종목 추가: GitHub API 로 tickers.json 커밋 + update.yml 실행
+     → GitHub Actions(사외)가 KRX에서 종가 조회 → prices.json 갱신
+   - KRX AUTH_KEY: GitHub secret (브라우저에 노출 안 됨)
+   - GitHub 토큰: 브라우저 localStorage (해당 repo 권한만)
+   - KRX 직접 접속 X: 회사 PC/폰 어디서든 GitHub 접속만으로 동작
    ========================================================= */
 
 const $ = (s, r = document) => r.querySelector(s);
-const KRW = (n) => (n == null || n === '') ? '-' : Number(n).toLocaleString('ko-KR') + '원';
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const KRW = (n) => (n == null || n === '' || n === null) ? '-' : Number(n).toLocaleString('ko-KR') + '원';
 const num = (v) => {
   if (typeof v === 'number') return v;
   const n = Number(String(v).replace(/[^0-9.-]/g, ''));
   return Number.isFinite(n) ? n : 0;
 };
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));}
+function b64encode(s){return btoa(unescape(encodeURIComponent(s)));}
+function b64decode(b){return decodeURIComponent(escape(atob(b.replace(/\s/g,''))));}
 
-const DATA_URL = './prices.json';
-const TICKERS_URL = './tickers.json';
+/* ----- 설정 (브라우저 localStorage) ----- */
+const CFG_KEY = 'krx-viewer-config-v1';
+function loadCfg(){
+  try { return JSON.parse(localStorage.getItem(CFG_KEY)) || {}; }
+  catch { return {}; }
+}
+function saveCfg(c){ localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
+let cfg = loadCfg(); // { owner, repo, token }
 
+function rawUrl(file){
+  return `https://raw.githubusercontent.com/${cfg.owner}/${cfg.repo}/main/${file}`;
+}
+function apiBase(){
+  return `https://api.github.com/repos/${cfg.owner}/${cfg.repo}`;
+}
+function ghHeaders(){
+  return {
+    'Authorization': `Bearer ${cfg.token}`,
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+}
+
+/* ----- 상태 ----- */
 const state = {
-  tickers: {},     // { "005930": "삼성전자", ... }
-  prices: {},      // { _updated, "005930": {name, price, date, market} }
+  tickers: {},      // { "005930": "삼성전자", ... }
+  prices: {},       // { _updated, "005930": {name, price, date, market} }
   loading: true,
   error: null,
   updated: null,
   filter: '',
-  sort: 'code',    // code | name | price
+  sort: 'code',
+  busy: false,      // 종목 추가/삭제 진행 중
+  status: '',       // 진행 상태 메시지
+  statusKind: 'info',
+  showSettings: false,
 };
 
 const classes = {
   card: 'rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl',
   input: 'w-full rounded-lg bg-slate-900 border border-white/10 px-3 py-2 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none',
-  badge: 'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
-  th: 'text-left text-xs font-medium text-slate-400 px-3 py-2 whitespace-nowrap cursor-pointer select-none hover:text-slate-200',
+  btn: 'rounded-xl bg-cyan-400 px-4 py-2 font-semibold text-slate-950 hover:bg-cyan-300 transition disabled:opacity-50 disabled:cursor-not-allowed',
+  btnGhost: 'rounded-xl border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/10 transition',
+  th: 'text-left text-xs font-medium text-slate-400 px-3 py-2 whitespace-nowrap',
   td: 'px-3 py-2.5',
+  badge: 'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
 };
 
-function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));}
-
+/* =========================================================
+   데이터 로드 (raw.githubusercontent.com — 커밋 즉시 반영)
+   ========================================================= */
 async function loadAll(){
-  state.loading = true; state.error = null;
+  state.loading = true; state.error = null; render();
   try {
     const [pr, tr] = await Promise.all([
-      fetch(DATA_URL + '?v=' + Date.now(), { cache: 'no-store' }).then(r => {
+      fetch(rawUrl('prices.json') + '?v=' + Date.now(), { cache: 'no-store' }).then(r => {
         if (!r.ok) throw new Error('prices.json HTTP ' + r.status);
         return r.json();
       }),
-      fetch(TICKERS_URL + '?v=' + Date.now(), { cache: 'no-store' }).then(r => {
+      fetch(rawUrl('tickers.json') + '?v=' + Date.now(), { cache: 'no-store' }).then(r => {
         if (!r.ok) throw new Error('tickers.json HTTP ' + r.status);
         return r.json();
       }),
     ]);
     state.prices = pr || {};
     state.tickers = tr || {};
-    // _comment 키 제외
     delete state.tickers['_comment'];
     state.updated = pr._updated || null;
   } catch (e) {
@@ -81,6 +116,148 @@ async function loadAll(){
   }
 }
 
+/* =========================================================
+   GitHub API: tickers.json 커밋
+   ========================================================= */
+async function getTickersFile(){
+  const r = await fetch(`${apiBase()}/contents/tickers.json`, { headers: ghHeaders() });
+  if (!r.ok) throw new Error('tickers.json 조회 실패 (HTTP ' + r.status + ')');
+  const j = await r.json();
+  return { sha: j.sha, content: j.content };
+}
+
+async function commitTickers(newObj, message){
+  const { sha, content } = await getTickersFile();
+  // 기존 내용과 병합하지 않고 서버 최신을 베이스로 사용
+  let cur = {};
+  try { cur = JSON.parse(b64decode(content)); } catch {}
+  // newObj: { add: {code:name}, remove: [codes] }
+  if (newObj.add) Object.assign(cur, newObj.add);
+  if (newObj.remove) newObj.remove.forEach(c => { delete cur[c]; });
+  // _comment 보존 (없으면 기본)
+  if (!cur['_comment']) cur['_comment'] = 'GitHub Actions가 자동 갱신할 종목. 6자리 번호만 입력하세요.';
+  const text = JSON.stringify(cur, null, 2) + '\n';
+  const r = await fetch(`${apiBase()}/contents/tickers.json`, {
+    method: 'PUT',
+    headers: { ...ghHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, content: b64encode(text), sha }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(()=>({}));
+    throw new Error('tickers.json 커밋 실패 (' + r.status + ' ' + (e.message||'') + ')');
+  }
+  return cur;
+}
+
+/* =========================================================
+   GitHub API: update.yml 워크플로우 실행
+   ========================================================= */
+async function dispatchWorkflow(){
+  const r = await fetch(`${apiBase()}/actions/workflows/update.yml/dispatches`, {
+    method: 'POST',
+    headers: { ...ghHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ref: 'main' }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(()=>({}));
+    throw new Error('워크플로우 실행 실패 (' + r.status + ' ' + (e.message||'') + ')');
+  }
+}
+
+/* =========================================================
+   종목 추가 전체 흐름: 커밋 → 실행 → prices.json 폴링
+   ========================================================= */
+async function addTicker(code){
+  code = String(code).trim().toUpperCase().replace(/\s/g,'');
+  if (!/^[A-Z0-9]{6}$/.test(code)){
+    setStatus('6자리 종목 코드를 입력하세요. 예: 005930', 'error');
+    return;
+  }
+  if (state.tickers[code]){
+    setStatus(code + ' 은(는) 이미 등록된 종목입니다.', 'error');
+    return;
+  }
+  state.busy = true;
+  setStatus('1/3 tickers.json 에 종목 추가 중…', 'info');
+  render();
+  try {
+    // 1) tickers.json 커밋 (이름은 모르므로 빈값 — update.yml이 KRX에서 이름 채움)
+    await commitTickers({ add: { [code]: '' } }, `Add ticker ${code}`);
+    // 로컬에 즉시 반영 (이름은 아직 모름)
+    state.tickers[code] = '조회 중…';
+    setStatus('2/3 GitHub Actions 실행 → KRX 종가 조회 중… (최대 3분)', 'info');
+    render();
+
+    // 2) 워크플로우 실행
+    await dispatchWorkflow();
+
+    // 3) prices.json 폴링 — 새 코드가 나타날 때까지
+    const found = await pollForCode(code, 180000, 8000);
+    if (found){
+      const p = state.prices[code];
+      if (p && p.price != null) setStatus(`${p.name || code} 종가 ${KRW(p.price)} 가져오기 완료 ✓`, 'ok');
+      else setStatus(`${code} — KRX에서 종가를 찾지 못했습니다. (휴일·거래중단·코드 오류 가능)`, 'warn');
+    } else {
+      setStatus(`${code} — 아직 갱신 중입니다. 잠시 후 🔄 새로고침을 누르거나 Actions 탭을 확인하세요.`, 'warn');
+    }
+  } catch (e) {
+    setStatus(e.message, 'error');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+async function deleteTicker(code){
+  if (!confirm(`${code} 종목을 삭제할까요? tickers.json에서 제거됩니다.`)) return;
+  state.busy = true;
+  setStatus('tickers.json 에서 종목 삭제 중…', 'info');
+  render();
+  try {
+    await commitTickers({ remove: [code] }, `Remove ticker ${code}`);
+    delete state.tickers[code];
+    setStatus(`${code} 삭제 완료 ✓`, 'ok');
+  } catch (e) {
+    setStatus(e.message, 'error');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+/* prices.json 폴링: 새 코드가 나타나면 true */
+async function pollForCode(code, timeoutMs, intervalMs){
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs){
+    await new Promise(r => setTimeout(r, intervalMs));
+    try {
+      const r = await fetch(rawUrl('prices.json') + '?v=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) continue;
+      const pr = await r.json();
+      if (pr && pr[code] && pr[code].price !== undefined){
+        state.prices = pr;
+        state.updated = pr._updated || null;
+        return true;
+      }
+      // _updated 가 바뀌었는데도 해당 코드가 없으면 → 종목을 못 찾은 것
+      if (pr && pr._updated && pr._updated !== state.updated){
+        state.prices = pr;
+        state.updated = pr._updated;
+        // 코드가 prices에 없으면 not found 로 종료
+        if (!pr[code] || pr[code].price === null){
+          return true; // prices.json 갱신됨 → 화면에 "정보 없음" 표시
+        }
+      }
+    } catch { /* 계속 폴링 */ }
+  }
+  return false;
+}
+
+function setStatus(msg, kind){ state.status = msg; state.statusKind = kind; }
+
+/* =========================================================
+   렌더링
+   ========================================================= */
 function buildRows(){
   const codes = Object.keys(state.tickers);
   const rows = codes.map(code => {
@@ -89,19 +266,18 @@ function buildRows(){
     const hasPrice = p && p.price != null;
     return {
       code,
-      name: (p && p.name) || tName || '등록된 종목',
+      name: (p && p.name) || tName || '조회 중…',
       market: p && p.market ? p.market : '',
       price: hasPrice ? num(p.price) : null,
       date: p && p.date ? p.date : '',
-      waiting: !hasPrice,
+      waiting: !hasPrice && !p,        // prices에 아직 없음
+      notfound: p && p.price === null, // prices엔 있으나 종가 없음
     };
   });
-  // 필터
   const f = state.filter.trim().toLowerCase();
   const filtered = f
     ? rows.filter(r => r.code.toLowerCase().includes(f) || r.name.toLowerCase().includes(f))
     : rows;
-  // 정렬
   filtered.sort((a, b) => {
     if (state.sort === 'name') return a.name.localeCompare(b.name, 'ko');
     if (state.sort === 'price') return (b.price ?? -1) - (a.price ?? -1);
@@ -112,29 +288,99 @@ function buildRows(){
 
 function render(){
   const app = $('#app');
-  if (state.loading){
-    app.innerHTML = `
-      <div class="flex items-center justify-center py-20 text-slate-400">
-        <div class="animate-pulse">📡 종가 데이터를 불러오는 중…</div>
-      </div>`;
+
+  // 설정 미완료 → 설정 화면
+  if (!cfg.owner || !cfg.repo || !cfg.token){
+    app.innerHTML = renderSetup();
+    bindSetup();
     return;
   }
+  if (state.showSettings){
+    app.innerHTML = renderMain() + renderSettingsModal();
+    bindMain();
+    bindSettingsModal();
+    return;
+  }
+
+  app.innerHTML = renderMain();
+  bindMain();
+}
+
+function renderSetup(){
+  const c = cfg;
+  return `
+    <div class="mx-auto max-w-xl">
+      <div class="${classes.card} mt-8">
+        <h1 class="text-2xl font-bold tracking-tight">📊 주식 종가 · Daily</h1>
+        <p class="mt-2 text-sm text-slate-300">GitHub Pages 에서 KRX 종가를 조회하는 뷰어입니다. 처음 설정으로 GitHub repo 정보와 토큰을 입력하세요.</p>
+        <div class="mt-6 space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">GitHub 사용자명 (owner)</label>
+            <input id="cfgOwner" class="${classes.input}" placeholder="예: your-username" value="${esc(c.owner||'')}" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">Repo 이름</label>
+            <input id="cfgRepo" class="${classes.input}" placeholder="예: stock-prices" value="${esc(c.repo||'')}" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-400 mb-1">GitHub 토큰 (fine-grained PAT)</label>
+            <input id="cfgToken" type="password" class="${classes.input}" placeholder="github_pat_..." value="${esc(c.token||'')}" autocomplete="off" />
+            <p class="mt-1 text-xs text-slate-500">권한: Contents (Read and write), Actions (Read and write), Metadata (Read). 해당 repo에만 제한 권장.</p>
+          </div>
+          <p id="setupMsg" class="text-xs text-rose-300 hidden"></p>
+          <button class="${classes.btn} w-full" data-action="saveSetup">저장하고 시작</button>
+        </div>
+        <div class="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-amber-200">
+          <p>🔒 토큰은 이 브라우저 localStorage 에만 저장됩니다. 다른 기기/브라우저에서는 다시 입력하면 됩니다 (종목 데이터는 repo에 있으므로 동일).</p>
+          <p class="mt-1">KRX 인증키(AUTH_KEY)는 GitHub repo 의 secret 으로만 사용되며 브라우저에 노출되지 않습니다.</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindSetup(){
+  $('#app [data-action="saveSetup"]')?.addEventListener('click', () => {
+    const owner = $('#cfgOwner').value.trim();
+    const repo = $('#cfgRepo').value.trim();
+    const token = $('#cfgToken').value.trim();
+    const msg = $('#setupMsg');
+    if (!owner || !repo || !token){
+      msg.textContent = '모두 입력하세요.'; msg.classList.remove('hidden'); return;
+    }
+    cfg = { owner, repo, token };
+    saveCfg(cfg);
+    state.loading = true;
+    render();
+    loadAll();
+  });
+}
+
+function renderMain(){
+  if (state.loading){
+    return `<div class="flex items-center justify-center py-20 text-slate-400"><div class="animate-pulse">📡 종가 데이터를 불러오는 중…</div></div>`;
+  }
   if (state.error){
-    app.innerHTML = `
+    return `
       <div class="${classes.card} border-rose-500/30">
         <h2 class="text-lg font-bold text-rose-300">데이터를 불러오지 못했습니다</h2>
         <p class="mt-2 text-sm text-slate-400">${esc(state.error)}</p>
-        <p class="mt-2 text-xs text-slate-500">prices.json / tickers.json 이 repo root에 있는지 확인하세요.</p>
-        <button class="mt-4 rounded-xl bg-cyan-400 px-4 py-2 font-semibold text-slate-950" data-action="reload">다시 시도</button>
+        <p class="mt-2 text-xs text-slate-500">repo 정보(owner/repo)와 tickers.json / prices.json 이 main 브랜치 root에 있는지 확인하세요.</p>
+        <div class="mt-4 flex gap-2">
+          <button class="${classes.btn}" data-action="reload">다시 시도</button>
+          <button class="${classes.btnGhost}" data-action="openSettings">⚙️ 설정</button>
+        </div>
       </div>`;
-    return;
   }
 
   const { rows, filtered } = buildRows();
-  const withPrice = rows.filter(r => !r.waiting).length;
+  const withPrice = rows.filter(r => !r.waiting && !r.notfound).length;
   const waiting = rows.filter(r => r.waiting).length;
+  const notfound = rows.filter(r => r.notfound).length;
 
-  app.innerHTML = `
+  const statusColor = { info:'text-slate-300', ok:'text-emerald-300', warn:'text-amber-300', error:'text-rose-300' }[state.statusKind] || 'text-slate-300';
+
+  return `
     <header class="mb-6">
       <div class="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -145,37 +391,41 @@ function render(){
           </p>
         </div>
         <div class="flex gap-2 no-print">
-          <button class="rounded-xl border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/10 transition" data-action="reload">🔄 새로고침</button>
+          <button class="${classes.btnGhost}" data-action="reload">🔄 새로고침</button>
+          <button class="${classes.btnGhost}" data-action="fetchNow">⚡ 수동 갱신</button>
+          <button class="${classes.btnGhost}" data-action="openSettings">⚙️</button>
         </div>
       </div>
     </header>
 
-    <section class="grid grid-cols-3 gap-3 mb-6">
-      <div class="${classes.card} text-center">
-        <p class="text-xs text-slate-400">전체 종목</p>
-        <p class="mt-1 text-2xl font-bold">${rows.length}</p>
+    <!-- 종목 추가 -->
+    <section class="${classes.card} mb-4 no-print">
+      <h2 class="text-sm font-semibold text-slate-300 mb-2">➕ 종목 추가 → KRX 종가 조회</h2>
+      <div class="flex gap-2">
+        <input id="newTicker" type="text" class="${classes.input}" placeholder="종목 코드 6자리 (예: 005930)" maxlength="6" autocapitalize="characters" />
+        <button class="${classes.btn} whitespace-nowrap" data-action="add" ${state.busy?'disabled':''}>추가</button>
       </div>
-      <div class="${classes.card} text-center">
-        <p class="text-xs text-slate-400">종가 있음</p>
-        <p class="mt-1 text-2xl font-bold text-emerald-300">${withPrice}</p>
-      </div>
-      <div class="${classes.card} text-center">
-        <p class="text-xs text-slate-400">대기 중</p>
-        <p class="mt-1 text-2xl font-bold text-amber-300">${waiting}</p>
-      </div>
+      ${state.status ? `<div class="mt-3 text-sm ${statusColor}">${esc(state.status)}</div>` : ''}
     </section>
 
+    <!-- 통계 -->
+    <section class="grid grid-cols-3 gap-3 mb-6">
+      <div class="${classes.card} text-center"><p class="text-xs text-slate-400">전체 종목</p><p class="mt-1 text-2xl font-bold">${rows.length}</p></div>
+      <div class="${classes.card} text-center"><p class="text-xs text-slate-400">종가 있음</p><p class="mt-1 text-2xl font-bold text-emerald-300">${withPrice}</p></div>
+      <div class="${classes.card} text-center"><p class="text-xs text-slate-400">대기/없음</p><p class="mt-1 text-2xl font-bold text-amber-300">${waiting + notfound}</p></div>
+    </section>
+
+    <!-- 검색/정렬 -->
     <section class="${classes.card} mb-4 no-print">
       <div class="flex flex-wrap items-center gap-3">
-        <input id="filter" type="text" class="${classes.input} max-w-xs" placeholder="종목명 또는 코드로 검색" value="${esc(state.filter)}" />
+        <input id="filter" type="text" class="${classes.input} max-w-xs" placeholder="종목명 또는 코드 검색" value="${esc(state.filter)}" />
         <div class="flex gap-2 text-xs">
-          <button class="rounded-lg px-2 py-1 ${state.sort==='code'?'bg-cyan-400 text-slate-950':'border border-white/10 text-slate-300'}" data-sort="code">코드순</button>
-          <button class="rounded-lg px-2 py-1 ${state.sort==='name'?'bg-cyan-400 text-slate-950':'border border-white/10 text-slate-300'}" data-sort="name">이름순</button>
-          <button class="rounded-lg px-2 py-1 ${state.sort==='price'?'bg-cyan-400 text-slate-950':'border border-white/10 text-slate-300'}" data-sort="price">종가순</button>
+          ${['code','name','price'].map(k => `<button class="rounded-lg px-2 py-1 ${state.sort===k?'bg-cyan-400 text-slate-950':'border border-white/10 text-slate-300'}" data-sort="${k}">${({code:'코드순',name:'이름순',price:'종가순'})[k]}</button>`).join('')}
         </div>
       </div>
     </section>
 
+    <!-- 표 -->
     <section class="${classes.card} overflow-x-auto">
       <table class="w-full border-collapse">
         <thead>
@@ -185,52 +435,129 @@ function render(){
             <th class="${classes.th}">시장</th>
             <th class="${classes.th} text-right">종가</th>
             <th class="${classes.th} text-right">기준일</th>
+            <th class="${classes.th} text-right no-print"></th>
           </tr>
         </thead>
         <tbody>
           ${filtered.length ? filtered.map(r => `
-            <tr class="border-b border-white/5 ${r.waiting ? 'opacity-60' : ''}">
+            <tr class="border-b border-white/5 ${(r.waiting||r.notfound)?'opacity-60':''}">
               <td class="${classes.td} font-medium">${esc(r.name)}</td>
               <td class="${classes.td} text-slate-400 font-mono text-xs">${esc(r.code)}</td>
               <td class="${classes.td}">${r.market ? `<span class="${classes.badge} bg-slate-700/40 text-slate-300">${esc(r.market)}</span>` : ''}</td>
-              <td class="${classes.td} text-right font-semibold ${r.waiting ? 'text-amber-300' : 'text-cyan-200'}">
-                ${r.waiting ? '대기 중' : KRW(r.price)}
+              <td class="${classes.td} text-right font-semibold ${r.waiting?'text-amber-300':r.notfound?'text-rose-300':'text-cyan-200'}">
+                ${r.waiting ? '대기 중' : r.notfound ? '정보 없음' : KRW(r.price)}
               </td>
               <td class="${classes.td} text-right text-xs text-slate-400">${r.date ? esc(r.date) : '—'}</td>
-            </tr>
-          `).join('') : `<tr><td colspan="5" class="${classes.td} text-center text-slate-500 py-8">검색 결과가 없습니다.</td></tr>`}
+              <td class="${classes.td} text-right no-print"><button class="text-xs text-rose-400 hover:text-rose-300" data-action="del" data-code="${esc(r.code)}" ${state.busy?'disabled':''}>삭제</button></td>
+            </tr>`).join('') : `<tr><td colspan="6" class="${classes.td} text-center text-slate-500 py-8">검색 결과가 없습니다.</td></tr>`}
         </tbody>
       </table>
     </section>
 
-    ${waiting > 0 ? `
-      <div class="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-200">
-        <strong>대기 중 ${waiting}종목</strong> — tickers.json 에는 등록됐지만 prices.json에 아직 종가가 없습니다. 다음 GitHub Actions 자동 갱신(평일) 또는 수동 실행 후 표시됩니다.
-      </div>` : ''}
-
     <footer class="mt-8 border-t border-white/10 pt-4 text-xs text-slate-500 no-print">
-      <p>📌 종목 추가/삭제는 GitHub repo의 <code class="text-slate-400">tickers.json</code>을 직접 수정하세요. <code class="text-slate-400">update.yml</code>이 KRX에서 종가를 가져와 <code class="text-slate-400">prices.json</code>을 갱신합니다.</p>
-      <p class="mt-1">※ 종가는 KRX Open API 기준 전 거래일 종가입니다. 시뮬레이션 목적이며 실제 투자 판단의 근거로 사용하지 마세요.</p>
+      <p>📌 종목 추가 시 GitHub Actions 가 KRX(사외)에서 종가를 조회해 prices.json 을 갱신합니다. 평일 자동 갱신(cron)도 수행됩니다.</p>
+      <p class="mt-1">※ 종가는 KRX Open API 기준 전 거래일 종가입니다. 시뮬레이션 목적이며 실제 투자 판단 근거로 사용하지 마세요.</p>
     </footer>
   `;
-  bindEvents();
 }
 
-const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+function renderSettingsModal(){
+  return `
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" data-action="closeSettings">
+      <div class="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-bold">⚙️ 설정</h2>
+          <button class="text-slate-400 hover:text-slate-100 text-xl" data-action="closeSettings">✕</button>
+        </div>
+        <div class="space-y-3">
+          <div><label class="block text-xs font-medium text-slate-400 mb-1">GitHub 사용자명 (owner)</label><input id="setOwner" class="${classes.input}" value="${esc(cfg.owner||'')}" /></div>
+          <div><label class="block text-xs font-medium text-slate-400 mb-1">Repo 이름</label><input id="setRepo" class="${classes.input}" value="${esc(cfg.repo||'')}" /></div>
+          <div><label class="block text-xs font-medium text-slate-400 mb-1">GitHub 토큰</label><input id="setToken" type="password" class="${classes.input}" value="${esc(cfg.token||'')}" autocomplete="off" /></div>
+          <p class="text-xs text-slate-500">토큰 권한: Contents (R/W), Actions (R/W), Metadata (R).</p>
+        </div>
+        <div class="mt-4 flex justify-between gap-2">
+          <button class="text-xs text-rose-400 hover:text-rose-300" data-action="clearCfg">전체 설정 초기화</button>
+          <div class="flex gap-2">
+            <button class="${classes.btnGhost}" data-action="closeSettings">취소</button>
+            <button class="${classes.btn}" data-action="saveCfg">저장</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
 
-function bindEvents(){
+function bindMain(){
   $('#app [data-action="reload"]')?.addEventListener('click', loadAll);
-  $('#filter')?.addEventListener('input', (e) => { state.filter = e.target.value; render(); });
-  // 정렬 버튼
-  $$('#app [data-sort]').forEach(btn => btn.addEventListener('click', () => {
-    state.sort = btn.dataset.sort;
-    render();
-  }));
+  $('#app [data-action="fetchNow"]')?.addEventListener('click', manualFetch);
+  $('#app [data-action="openSettings"]')?.addEventListener('click', () => { state.showSettings = true; render(); });
+  $('#app [data-action="add"]')?.addEventListener('click', () => {
+    const v = $('#newTicker').value;
+    if (v) addTicker(v);
+  });
+  $('#newTicker')?.addEventListener('keydown', e => { if (e.key === 'Enter') $('#app [data-action="add"]').click(); });
+  $('#filter')?.addEventListener('input', e => { state.filter = e.target.value; render(); });
+  $$('#app [data-sort]').forEach(b => b.addEventListener('click', () => { state.sort = b.dataset.sort; render(); }));
+  $$('#app [data-action="del"]').forEach(b => b.addEventListener('click', () => deleteTicker(b.dataset.code)));
 }
 
-loadAll();
-// 5분마다 자동 새로고침
-setInterval(loadAll, 5 * 60 * 1000);
+function bindSettingsModal(){
+  $('#app [data-action="closeSettings"]')?.addEventListener('click', () => { state.showSettings = false; render(); });
+  $('#app [data-action="saveCfg"]')?.addEventListener('click', () => {
+    cfg = { owner: $('#setOwner').value.trim(), repo: $('#setRepo').value.trim(), token: $('#setToken').value.trim() };
+    saveCfg(cfg);
+    state.showSettings = false;
+    state.loading = true;
+    render();
+    loadAll();
+  });
+  $('#app [data-action="clearCfg"]')?.addEventListener('click', () => {
+    if (confirm('설정(토큰 포함)을 삭제하고 처음 화면으로 돌아갑니다.')){
+      localStorage.removeItem(CFG_KEY);
+      cfg = {};
+      state.showSettings = false;
+      render();
+    }
+  });
+}
+
+async function manualFetch(){
+  state.busy = true;
+  setStatus('GitHub Actions 실행 → KRX 종가 갱신 중… (최대 3분)', 'info');
+  render();
+  try {
+    await dispatchWorkflow();
+    const before = state.updated;
+    const changed = await pollForUpdate(180000, 8000, before);
+    if (changed) setStatus('종가 갱신 완료 ✓', 'ok');
+    else setStatus('아직 갱신 중입니다. 잠시 후 🔄 새로고침을 누르세요.', 'warn');
+  } catch (e) {
+    setStatus(e.message, 'error');
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+async function pollForUpdate(timeoutMs, intervalMs, beforeUpdated){
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs){
+    await new Promise(r => setTimeout(r, intervalMs));
+    try {
+      const r = await fetch(rawUrl('prices.json') + '?v=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) continue;
+      const pr = await r.json();
+      if (pr && pr._updated && pr._updated !== beforeUpdated){
+        state.prices = pr;
+        state.updated = pr._updated;
+        return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
+render();
+if (cfg.owner && cfg.repo && cfg.token) loadAll();
 </script>
 </body>
 </html>
