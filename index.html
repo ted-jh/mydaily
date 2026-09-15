@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>주식 종가 · Daily</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
@@ -13,6 +13,8 @@
   .card-clip{overflow:hidden}
   .wrap-anywhere{overflow-wrap:anywhere;word-break:break-word}
   .num{font-variant-numeric:tabular-nums}
+  /* 입력창은 iOS 줌인 방지용 16px 유지, 라벨/버튼 등은 아래 클래스로 축소 */
+  .text-sm-input{font-size:14px}
   input[type="number"]::-webkit-outer-spin-button,
   input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
   @media print{.no-print{display:none!important}}
@@ -88,7 +90,7 @@ const state = {
 
 const classes = {
   card: 'rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl',
-  input: 'w-full rounded-lg bg-slate-900 border border-white/10 px-3 py-2 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none',
+  input: 'w-full rounded-lg bg-slate-900 border border-white/10 px-3 py-2 text-base text-slate-100 focus:border-cyan-400 focus:outline-none',
   btn: 'rounded-xl bg-cyan-400 px-4 py-2 font-semibold text-slate-950 hover:bg-cyan-300 transition disabled:opacity-50 disabled:cursor-not-allowed',
   btnGhost: 'rounded-xl border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/10 transition',
   th: 'text-left text-xs font-medium text-slate-400 px-3 py-2 whitespace-nowrap',
@@ -115,8 +117,8 @@ async function fetchRawJson(file){
 
 async function loadAll(){
   state.loading = true; state.error = null;
-  // 새로고침 시 이전 상태 메시지 제거 (완료된 작업의 메시지가 남지 않도록)
-  if (state.status && state.statusKind !== 'error') setStatus('', 'info');
+  // 새로고침 시 이전 상태 메시지 제거 (에러는 유지, 진행/완료 메시지 제거)
+  if (state.statusKind !== 'error') clearStatus();
   render();
   try {
     // 토큰 있으면 API(커밋 즉시 반영, 캐시 없음), 없으면 raw(CDN 캐시 ~5분)
@@ -217,10 +219,10 @@ async function addTicker(code){
     const found = await pollForCode(code, 360000, 8000);
     if (found){
       const p = state.prices[code];
-      if (p && p.price != null) setStatus(`${p.name || code} 종가 ${KRW(p.price)} 가져오기 완료 ✓`, 'ok');
-      else setStatus(`${code} — KRX에서 종가를 찾지 못했습니다. (휴일·거래중단·코드 오류 가능)`, 'warn');
+      if (p && p.price != null) setStatus(`${p.name || code} 종가 ${KRW(p.price)} 가져오기 완료 ✓`, 'ok', 6000);
+      else setStatus(`${code} — KRX에서 종가를 찾지 못했습니다. (휴일·거래중단·코드 오류 가능)`, 'warn', 8000);
     } else {
-      setStatus(`${code} — Actions 실행이 지연되고 있습니다. 잠시 후 🔄 새로고침을 누르거나 Actions 탭을 확인하세요.`, 'warn');
+      setStatus(`${code} — Actions 실행이 지연되고 있습니다. 잠시 후 🔄 새로고침을 누르거나 Actions 탭을 확인하세요.`, 'warn', 10000);
     }
   } catch (e) {
     setStatus(e.message, 'error');
@@ -240,7 +242,7 @@ async function deleteTicker(code){
     // 커밋 결과(서버 최신)로 로컬 tickers 동기화 — 캐시된 옛날 데이터 복원 방지
     delete cur['_comment'];
     state.tickers = cur;
-    setStatus(`${code} 삭제 완료 ✓ — 🔄 새로고침해도 삭제가 유지됩니다.`, 'ok');
+    setStatus(`${code} 삭제 완료 ✓ — 🔄 새로고침해도 삭제가 유지됩니다.`, 'ok', 6000);
   } catch (e) {
     setStatus(e.message, 'error');
   } finally {
@@ -275,7 +277,23 @@ async function pollForCode(code, timeoutMs, intervalMs){
   return false;
 }
 
-function setStatus(msg, kind){ state.status = msg; state.statusKind = kind; }
+let statusTimer = null;
+function setStatus(msg, kind, autoClearMs = 0){
+  state.status = msg; state.statusKind = kind;
+  // 진행 중(info) 메시지는 자동 소멸 X (완료/오류만 자동 소멸)
+  if (autoClearMs > 0){
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => {
+      // 소멸 전 상태가 바뀌지 않았을 때만 제거 (새 메시지 덮어쓰기 보호)
+      if (state.status === msg){
+        state.status = ''; state.statusKind = 'info';
+        render();
+      }
+    }, autoClearMs);
+  }
+}
+// 메시지 즉시 제거
+function clearStatus(){ if (statusTimer) clearTimeout(statusTimer); state.status = ''; state.statusKind = 'info'; }
 
 /* =========================================================
    렌더링
@@ -558,8 +576,8 @@ async function manualFetch(){
     await dispatchWorkflow();
     const before = state.updated;
     const changed = await pollForUpdate(360000, 8000, before);
-    if (changed) setStatus('종가 갱신 완료 ✓', 'ok');
-    else setStatus('Actions 실행이 지연되고 있습니다. 잠시 후 🔄 새로고침을 누르세요.', 'warn');
+    if (changed) setStatus('종가 갱신 완료 ✓', 'ok', 6000);
+    else setStatus('Actions 실행이 지연되고 있습니다. 잠시 후 🔄 새로고침을 누르세요.', 'warn', 10000);
   } catch (e) {
     setStatus(e.message, 'error');
   } finally {
