@@ -3,97 +3,234 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Daily</title>
+<title>주식 종가 · Daily</title>
+<script src="https://cdn.tailwindcss.com"></script>
 <style>
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:720px;margin:32px auto;padding:0 18px;color:#222}
-h1{font-size:24px;margin-bottom:8px}.sub{color:#666;font-size:14px}
-.form{display:flex;gap:8px;margin:22px 0}.form input{flex:1;padding:12px;border:1px solid #ccc;border-radius:8px;font-size:16px}
-button{padding:12px 16px;border:0;border-radius:8px;background:#222;color:#fff;font-size:15px;cursor:pointer}
-table{width:100%;border-collapse:collapse;margin-top:16px}th,td{padding:13px 8px;border-bottom:1px solid #eee}
-th{text-align:left;color:#666;font-size:13px}.num{text-align:right}
-.msg{min-height:22px;color:#666;font-size:14px}.error{color:#b00020}.small{font-size:12px;color:#888;margin-top:16px}
+  [x-cloak]{display:none!important}
+  .num{font-variant-numeric:tabular-nums}
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+  @media print{.no-print{display:none!important}}
 </style>
 </head>
-<body>
-<h1>Daily</h1>
-<div class="sub">전 거래일 종가</div>
-<div class="form">
-<input id="ticker" inputmode="text" autocapitalize="characters" maxlength="6"
-placeholder="종목번호 6자리 (예: 005930 / 0064K0)">
-<button id="add">추가</button>
-</div>
-<div id="msg" class="msg"></div>
-<table>
-<thead><tr><th>종목</th><th class="num">전 거래일 종가</th><th></th></tr></thead>
-<tbody id="rows"></tbody>
-</table>
-<div id="updated" class="small"></div>
+<body class="min-h-screen bg-slate-950 text-slate-100 antialiased num">
+<main id="app" class="mx-auto max-w-5xl p-6"></main>
 <script>
-const DATA_URL="./prices.json";
-const KEY="daily_tickers_v3";
-let data={};
+/* =========================================================
+   주식 종가 뷰어 (읽기 전용)
+   - tickers.json : 종목 목록 (코드 → 이름) — GitHub에서 수동 관리
+   - prices.json  : KRX 종가 (update.yml이 평일 자동 갱신)
+   - localStorage 의존 없음 → 어디서 접속해도 동일 화면
+   ========================================================= */
+
+const $ = (s, r = document) => r.querySelector(s);
+const KRW = (n) => (n == null || n === '') ? '-' : Number(n).toLocaleString('ko-KR') + '원';
+const num = (v) => {
+  if (typeof v === 'number') return v;
+  const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+};
+
+const DATA_URL = './prices.json';
+const TICKERS_URL = './tickers.json';
+
+const state = {
+  tickers: {},     // { "005930": "삼성전자", ... }
+  prices: {},      // { _updated, "005930": {name, price, date, market} }
+  loading: true,
+  error: null,
+  updated: null,
+  filter: '',
+  sort: 'code',    // code | name | price
+};
+
+const classes = {
+  card: 'rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl',
+  input: 'w-full rounded-lg bg-slate-900 border border-white/10 px-3 py-2 text-sm text-slate-100 focus:border-cyan-400 focus:outline-none',
+  badge: 'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium',
+  th: 'text-left text-xs font-medium text-slate-400 px-3 py-2 whitespace-nowrap cursor-pointer select-none hover:text-slate-200',
+  td: 'px-3 py-2.5',
+};
 
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));}
-function normalizeTicker(x){return String(x).trim().toUpperCase().replace(/\s/g,"");}
 
-function getTickers(){
-  try{
-    const a=JSON.parse(localStorage.getItem(KEY)||"[]");
-    return [...new Set(a.map(normalizeTicker).filter(x=>/^[A-Z0-9]{6}$/.test(x)))];
-  }catch(e){return [];}
+async function loadAll(){
+  state.loading = true; state.error = null;
+  try {
+    const [pr, tr] = await Promise.all([
+      fetch(DATA_URL + '?v=' + Date.now(), { cache: 'no-store' }).then(r => {
+        if (!r.ok) throw new Error('prices.json HTTP ' + r.status);
+        return r.json();
+      }),
+      fetch(TICKERS_URL + '?v=' + Date.now(), { cache: 'no-store' }).then(r => {
+        if (!r.ok) throw new Error('tickers.json HTTP ' + r.status);
+        return r.json();
+      }),
+    ]);
+    state.prices = pr || {};
+    state.tickers = tr || {};
+    // _comment 키 제외
+    delete state.tickers['_comment'];
+    state.updated = pr._updated || null;
+  } catch (e) {
+    state.error = e.message;
+    state.prices = {}; state.tickers = {};
+  } finally {
+    state.loading = false;
+    render();
+  }
 }
-function saveTickers(a){localStorage.setItem(KEY,JSON.stringify(a));}
+
+function buildRows(){
+  const codes = Object.keys(state.tickers);
+  const rows = codes.map(code => {
+    const tName = state.tickers[code];
+    const p = state.prices[code];
+    const hasPrice = p && p.price != null;
+    return {
+      code,
+      name: (p && p.name) || tName || '등록된 종목',
+      market: p && p.market ? p.market : '',
+      price: hasPrice ? num(p.price) : null,
+      date: p && p.date ? p.date : '',
+      waiting: !hasPrice,
+    };
+  });
+  // 필터
+  const f = state.filter.trim().toLowerCase();
+  const filtered = f
+    ? rows.filter(r => r.code.toLowerCase().includes(f) || r.name.toLowerCase().includes(f))
+    : rows;
+  // 정렬
+  filtered.sort((a, b) => {
+    if (state.sort === 'name') return a.name.localeCompare(b.name, 'ko');
+    if (state.sort === 'price') return (b.price ?? -1) - (a.price ?? -1);
+    return a.code.localeCompare(b.code);
+  });
+  return { rows, filtered };
+}
 
 function render(){
-  const rows=document.getElementById("rows"), list=getTickers();
-  rows.innerHTML="";
-  if(!list.length){
-    rows.innerHTML='<tr><td colspan="3" style="color:#888">종목번호를 입력해 추가하세요.</td></tr>';
+  const app = $('#app');
+  if (state.loading){
+    app.innerHTML = `
+      <div class="flex items-center justify-center py-20 text-slate-400">
+        <div class="animate-pulse">📡 종가 데이터를 불러오는 중…</div>
+      </div>`;
     return;
   }
-  for(const t of list){
-    const d=data[t];
-    const name=d?.name||"등록된 종목";
-    const price=d?.price==null?"-":Number(d.price).toLocaleString("ko-KR")+"원";
-    const date=d?.date||"", market=d?.market||"";
-    rows.insertAdjacentHTML("beforeend",
-      `<tr><td>${esc(name)}<div style="font-size:12px;color:#999">${esc(t)}${market?" · "+esc(market):""}${date?" · "+esc(date):""}</div></td>
-      <td class="num">${price}</td>
-      <td class="num"><button style="padding:7px 9px;font-size:12px" onclick="removeTicker('${esc(t)}')">삭제</button></td></tr>`);
+  if (state.error){
+    app.innerHTML = `
+      <div class="${classes.card} border-rose-500/30">
+        <h2 class="text-lg font-bold text-rose-300">데이터를 불러오지 못했습니다</h2>
+        <p class="mt-2 text-sm text-slate-400">${esc(state.error)}</p>
+        <p class="mt-2 text-xs text-slate-500">prices.json / tickers.json 이 repo root에 있는지 확인하세요.</p>
+        <button class="mt-4 rounded-xl bg-cyan-400 px-4 py-2 font-semibold text-slate-950" data-action="reload">다시 시도</button>
+      </div>`;
+    return;
   }
-}
-function removeTicker(t){saveTickers(getTickers().filter(x=>x!==t));render();}
 
-async function load(){
-  const msg=document.getElementById("msg");
-  try{
-    const r=await fetch(DATA_URL+"?v="+Date.now(),{cache:"no-store"});
-    if(!r.ok)throw new Error("HTTP "+r.status);
-    data=await r.json();
-    document.getElementById("updated").textContent=data._updated?"데이터 갱신: "+data._updated:"";
-    render();msg.textContent="";msg.className="msg";
-  }catch(e){
-    data={};render();
-    msg.textContent="종가 데이터 파일을 불러오지 못했습니다.";
-    msg.className="msg error";
-  }
+  const { rows, filtered } = buildRows();
+  const withPrice = rows.filter(r => !r.waiting).length;
+  const waiting = rows.filter(r => r.waiting).length;
+
+  app.innerHTML = `
+    <header class="mb-6">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight">📊 주식 종가 · Daily</h1>
+          <p class="mt-1 text-sm text-slate-400">
+            ${state.updated ? '갱신: ' + esc(state.updated) : '갱신 정보 없음'} ·
+            KRX 전 거래일 종가 (GitHub Actions 자동 갱신)
+          </p>
+        </div>
+        <div class="flex gap-2 no-print">
+          <button class="rounded-xl border border-white/10 px-3 py-1.5 text-sm text-slate-300 hover:bg-white/10 transition" data-action="reload">🔄 새로고침</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="grid grid-cols-3 gap-3 mb-6">
+      <div class="${classes.card} text-center">
+        <p class="text-xs text-slate-400">전체 종목</p>
+        <p class="mt-1 text-2xl font-bold">${rows.length}</p>
+      </div>
+      <div class="${classes.card} text-center">
+        <p class="text-xs text-slate-400">종가 있음</p>
+        <p class="mt-1 text-2xl font-bold text-emerald-300">${withPrice}</p>
+      </div>
+      <div class="${classes.card} text-center">
+        <p class="text-xs text-slate-400">대기 중</p>
+        <p class="mt-1 text-2xl font-bold text-amber-300">${waiting}</p>
+      </div>
+    </section>
+
+    <section class="${classes.card} mb-4 no-print">
+      <div class="flex flex-wrap items-center gap-3">
+        <input id="filter" type="text" class="${classes.input} max-w-xs" placeholder="종목명 또는 코드로 검색" value="${esc(state.filter)}" />
+        <div class="flex gap-2 text-xs">
+          <button class="rounded-lg px-2 py-1 ${state.sort==='code'?'bg-cyan-400 text-slate-950':'border border-white/10 text-slate-300'}" data-sort="code">코드순</button>
+          <button class="rounded-lg px-2 py-1 ${state.sort==='name'?'bg-cyan-400 text-slate-950':'border border-white/10 text-slate-300'}" data-sort="name">이름순</button>
+          <button class="rounded-lg px-2 py-1 ${state.sort==='price'?'bg-cyan-400 text-slate-950':'border border-white/10 text-slate-300'}" data-sort="price">종가순</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="${classes.card} overflow-x-auto">
+      <table class="w-full border-collapse">
+        <thead>
+          <tr class="border-b border-white/10">
+            <th class="${classes.th}">종목</th>
+            <th class="${classes.th}">코드</th>
+            <th class="${classes.th}">시장</th>
+            <th class="${classes.th} text-right">종가</th>
+            <th class="${classes.th} text-right">기준일</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.length ? filtered.map(r => `
+            <tr class="border-b border-white/5 ${r.waiting ? 'opacity-60' : ''}">
+              <td class="${classes.td} font-medium">${esc(r.name)}</td>
+              <td class="${classes.td} text-slate-400 font-mono text-xs">${esc(r.code)}</td>
+              <td class="${classes.td}">${r.market ? `<span class="${classes.badge} bg-slate-700/40 text-slate-300">${esc(r.market)}</span>` : ''}</td>
+              <td class="${classes.td} text-right font-semibold ${r.waiting ? 'text-amber-300' : 'text-cyan-200'}">
+                ${r.waiting ? '대기 중' : KRW(r.price)}
+              </td>
+              <td class="${classes.td} text-right text-xs text-slate-400">${r.date ? esc(r.date) : '—'}</td>
+            </tr>
+          `).join('') : `<tr><td colspan="5" class="${classes.td} text-center text-slate-500 py-8">검색 결과가 없습니다.</td></tr>`}
+        </tbody>
+      </table>
+    </section>
+
+    ${waiting > 0 ? `
+      <div class="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-200">
+        <strong>대기 중 ${waiting}종목</strong> — tickers.json 에는 등록됐지만 prices.json에 아직 종가가 없습니다. 다음 GitHub Actions 자동 갱신(평일) 또는 수동 실행 후 표시됩니다.
+      </div>` : ''}
+
+    <footer class="mt-8 border-t border-white/10 pt-4 text-xs text-slate-500 no-print">
+      <p>📌 종목 추가/삭제는 GitHub repo의 <code class="text-slate-400">tickers.json</code>을 직접 수정하세요. <code class="text-slate-400">update.yml</code>이 KRX에서 종가를 가져와 <code class="text-slate-400">prices.json</code>을 갱신합니다.</p>
+      <p class="mt-1">※ 종가는 KRX Open API 기준 전 거래일 종가입니다. 시뮬레이션 목적이며 실제 투자 판단의 근거로 사용하지 마세요.</p>
+    </footer>
+  `;
+  bindEvents();
 }
 
-function addTicker(){
-  const input=document.getElementById("ticker"), t=normalizeTicker(input.value);
-  const msg=document.getElementById("msg");
-  if(!/^[A-Z0-9]{6}$/.test(t)){
-    msg.textContent="6자리 종목번호를 입력하세요. 예: 005930 또는 0064K0";
-    msg.className="msg error";return;
-  }
-  const list=getTickers();
-  if(!list.includes(t)){list.push(t);saveTickers(list);}
-  msg.textContent=data[t]?data[t].name+"을(를) 추가했습니다.":"등록했습니다. 데이터가 아직 없으면 다음 자동 갱신 후 표시됩니다.";
-  msg.className="msg";input.value="";render();
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+function bindEvents(){
+  $('#app [data-action="reload"]')?.addEventListener('click', loadAll);
+  $('#filter')?.addEventListener('input', (e) => { state.filter = e.target.value; render(); });
+  // 정렬 버튼
+  $$('#app [data-sort]').forEach(btn => btn.addEventListener('click', () => {
+    state.sort = btn.dataset.sort;
+    render();
+  }));
 }
-document.getElementById("add").addEventListener("click",addTicker);
-document.getElementById("ticker").addEventListener("keydown",e=>{if(e.key==="Enter")addTicker();});
-load();
+
+loadAll();
+// 5분마다 자동 새로고침
+setInterval(loadAll, 5 * 60 * 1000);
 </script>
 </body>
 </html>
