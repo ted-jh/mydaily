@@ -96,18 +96,28 @@ const classes = {
 /* =========================================================
    데이터 로드 (raw.githubusercontent.com — 커밋 즉시 반영)
    ========================================================= */
+/* GitHub API로 파일 가져오기 — CDN 캐시 우회, 커밋 즉시 최신 (토큰 필요) */
+async function fetchApiJson(file){
+  const r = await fetch(`${apiBase()}/contents/${file}`, { headers: ghHeaders() });
+  if (!r.ok) throw new Error(file + ' HTTP ' + r.status);
+  const j = await r.json();
+  return JSON.parse(b64decode(j.content));
+}
+/* raw.githubusercontent.com — 토큰 없는 조회자용 */
+async function fetchRawJson(file){
+  const r = await fetch(rawUrl(file) + '?v=' + Date.now(), { cache: 'no-store' });
+  if (!r.ok) throw new Error(file + ' HTTP ' + r.status);
+  return r.json();
+}
+
 async function loadAll(){
   state.loading = true; state.error = null; render();
   try {
+    // 토큰 있으면 API(커밋 즉시 반영, 캐시 없음), 없으면 raw(CDN 캐시 ~5분)
+    const useApi = !!cfg.token;
     const [pr, tr] = await Promise.all([
-      fetch(rawUrl('prices.json') + '?v=' + Date.now(), { cache: 'no-store' }).then(r => {
-        if (!r.ok) throw new Error('prices.json HTTP ' + r.status);
-        return r.json();
-      }),
-      fetch(rawUrl('tickers.json') + '?v=' + Date.now(), { cache: 'no-store' }).then(r => {
-        if (!r.ok) throw new Error('tickers.json HTTP ' + r.status);
-        return r.json();
-      }),
+      useApi ? fetchApiJson('prices.json') : fetchRawJson('prices.json'),
+      useApi ? fetchApiJson('tickers.json') : fetchRawJson('tickers.json'),
     ]);
     state.prices = pr || {};
     state.tickers = tr || {};
@@ -220,9 +230,11 @@ async function deleteTicker(code){
   setStatus('tickers.json 에서 종목 삭제 중…', 'info');
   render();
   try {
-    await commitTickers({ remove: [code] }, `Remove ticker ${code}`);
-    delete state.tickers[code];
-    setStatus(`${code} 삭제 완료 ✓`, 'ok');
+    const cur = await commitTickers({ remove: [code] }, `Remove ticker ${code}`);
+    // 커밋 결과(서버 최신)로 로컬 tickers 동기화 — 캐시된 옛날 데이터 복원 방지
+    delete cur['_comment'];
+    state.tickers = cur;
+    setStatus(`${code} 삭제 완료 ✓ — 🔄 새로고침해도 삭제가 유지됩니다.`, 'ok');
   } catch (e) {
     setStatus(e.message, 'error');
   } finally {
@@ -234,12 +246,11 @@ async function deleteTicker(code){
 /* prices.json 폴링: 새 코드가 나타나면 true */
 async function pollForCode(code, timeoutMs, intervalMs){
   const start = Date.now();
+  const useApi = !!cfg.token;
   while (Date.now() - start < timeoutMs){
     await new Promise(r => setTimeout(r, intervalMs));
     try {
-      const r = await fetch(rawUrl('prices.json') + '?v=' + Date.now(), { cache: 'no-store' });
-      if (!r.ok) continue;
-      const pr = await r.json();
+      const pr = useApi ? await fetchApiJson('prices.json') : await fetchRawJson('prices.json');
       if (pr && pr[code] && pr[code].price !== undefined){
         state.prices = pr;
         state.updated = pr._updated || null;
@@ -554,12 +565,11 @@ async function manualFetch(){
 
 async function pollForUpdate(timeoutMs, intervalMs, beforeUpdated){
   const start = Date.now();
+  const useApi = !!cfg.token;
   while (Date.now() - start < timeoutMs){
     await new Promise(r => setTimeout(r, intervalMs));
     try {
-      const r = await fetch(rawUrl('prices.json') + '?v=' + Date.now(), { cache: 'no-store' });
-      if (!r.ok) continue;
-      const pr = await r.json();
+      const pr = useApi ? await fetchApiJson('prices.json') : await fetchRawJson('prices.json');
       if (pr && pr._updated && pr._updated !== beforeUpdated){
         state.prices = pr;
         state.updated = pr._updated;
