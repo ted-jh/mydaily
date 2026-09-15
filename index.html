@@ -14,7 +14,7 @@
 </style>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100 antialiased num">
-<main id="app" class="mx-auto max-w-5xl p-6"></main>
+<main id="app" class="mx-auto max-w-3xl p-4 sm:p-6"></main>
 <script>
 /* =========================================================
    주식 종가 뷰어 + 종목 추가 (GitHub Pages)
@@ -409,10 +409,10 @@ function renderMain(){
     </section>
 
     <!-- 통계 -->
-    <section class="grid grid-cols-3 gap-3 mb-6">
-      <div class="${classes.card} text-center"><p class="text-xs text-slate-400">전체 종목</p><p class="mt-1 text-2xl font-bold">${rows.length}</p></div>
-      <div class="${classes.card} text-center"><p class="text-xs text-slate-400">종가 있음</p><p class="mt-1 text-2xl font-bold text-emerald-300">${withPrice}</p></div>
-      <div class="${classes.card} text-center"><p class="text-xs text-slate-400">대기/없음</p><p class="mt-1 text-2xl font-bold text-amber-300">${waiting + notfound}</p></div>
+    <section class="grid grid-cols-3 gap-2 mb-4">
+      <div class="${classes.card} !p-3 text-center"><p class="text-[10px] text-slate-400">전체</p><p class="mt-0.5 text-xl font-bold">${rows.length}</p></div>
+      <div class="${classes.card} !p-3 text-center"><p class="text-[10px] text-slate-400">종가있음</p><p class="mt-0.5 text-xl font-bold text-emerald-300">${withPrice}</p></div>
+      <div class="${classes.card} !p-3 text-center"><p class="text-[10px] text-slate-400">대기/없음</p><p class="mt-0.5 text-xl font-bold text-amber-300">${waiting + notfound}</p></div>
     </section>
 
     <!-- 검색/정렬 -->
@@ -425,33 +425,41 @@ function renderMain(){
       </div>
     </section>
 
-    <!-- 표 -->
-    <section class="${classes.card} overflow-x-auto">
-      <table class="w-full border-collapse">
-        <thead>
-          <tr class="border-b border-white/10">
-            <th class="${classes.th}">종목</th>
-            <th class="${classes.th}">코드</th>
-            <th class="${classes.th}">시장</th>
-            <th class="${classes.th} text-right">종가</th>
-            <th class="${classes.th} text-right">기준일</th>
-            <th class="${classes.th} text-right no-print"></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered.length ? filtered.map(r => `
-            <tr class="border-b border-white/5 ${(r.waiting||r.notfound)?'opacity-60':''}">
-              <td class="${classes.td} font-medium">${esc(r.name)}</td>
-              <td class="${classes.td} text-slate-400 font-mono text-xs">${esc(r.code)}</td>
-              <td class="${classes.td}">${r.market ? `<span class="${classes.badge} bg-slate-700/40 text-slate-300">${esc(r.market)}</span>` : ''}</td>
-              <td class="${classes.td} text-right font-semibold ${r.waiting?'text-amber-300':r.notfound?'text-rose-300':'text-cyan-200'}">
+    <!-- 리스트 (모바일 2줄 레이아웃) -->
+    <section class="${classes.card} !p-3 sm:!p-5">
+      <!-- 헤더 (sm 이상에서만) -->
+      <div class="hidden sm:flex border-b border-white/10 pb-2 mb-1 text-[11px] text-slate-500 uppercase tracking-wide">
+        <span class="flex-1">종목 · 코드 · 시장</span>
+        <span class="w-28 text-right">종가</span>
+        <span class="w-20 text-right">기준일</span>
+        <span class="w-10 text-right">×</span>
+      </div>
+      <div class="space-y-1">
+        ${filtered.length ? filtered.map(r => `
+          <div class="flex items-stretch gap-2 py-2 border-b border-white/5 last:border-0 ${(r.waiting||r.notfound)?'opacity-60':''}">
+            <!-- 좌: 종목명(위) / 코드·시장(아래) -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="font-semibold text-[15px] text-slate-100 truncate">${esc(r.name)}</span>
+              </div>
+              <div class="mt-0.5 flex items-center gap-1.5 text-[11px] min-w-0">
+                <span class="font-mono text-cyan-400/80">${esc(r.code)}</span>
+                ${r.market ? `<span class="${classes.badge} bg-slate-700/40 text-slate-300 !text-[10px] !px-1.5 !py-0">${esc(r.market)}</span>` : ''}
+              </div>
+            </div>
+            <!-- 중: 종가(위) / 기준일(아래) -->
+            <div class="w-28 flex flex-col items-end justify-center shrink-0">
+              <span class="font-semibold text-[15px] tabular-nums ${r.waiting?'text-amber-300':r.notfound?'text-rose-300':'text-cyan-200'}">
                 ${r.waiting ? '대기 중' : r.notfound ? '정보 없음' : KRW(r.price)}
-              </td>
-              <td class="${classes.td} text-right text-xs text-slate-400">${r.date ? esc(r.date) : '—'}</td>
-              <td class="${classes.td} text-right no-print"><button class="text-xs text-rose-400 hover:text-rose-300" data-action="del" data-code="${esc(r.code)}" ${state.busy?'disabled':''}>삭제</button></td>
-            </tr>`).join('') : `<tr><td colspan="6" class="${classes.td} text-center text-slate-500 py-8">검색 결과가 없습니다.</td></tr>`}
-        </tbody>
-      </table>
+              </span>
+              <span class="mt-0.5 text-[11px] text-slate-500 tabular-nums">${r.date ? esc(r.date) : '—'}</span>
+            </div>
+            <!-- 우: 삭제 -->
+            <div class="w-10 flex items-center justify-end shrink-0 no-print">
+              <button class="text-[13px] text-rose-400/80 hover:text-rose-300 disabled:opacity-40" data-action="del" data-code="${esc(r.code)}" ${state.busy?'disabled':''} title="삭제">✕</button>
+            </div>
+          </div>`).join('') : `<div class="text-center text-slate-500 py-8 text-sm">검색 결과가 없습니다.</div>`}
+      </div>
     </section>
 
     <footer class="mt-8 border-t border-white/10 pt-4 text-xs text-slate-500 no-print">
