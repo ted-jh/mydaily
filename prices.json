@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-09-15 16:53",
+  "_updated": "2026-09-15 16:55",
   "396500": {
     "name": "TIGER 반도체TOP10",
     "price": 34760,
@@ -41,5 +41,11 @@
     "price": 10645,
     "date": "20260914",
     "market": "ETF"
+  },
+  "0129E0": {
+    "name": "",
+    "price": null,
+    "date": null,
+    "market": null
   }
 }
