@@ -555,7 +555,8 @@ function bindMain(){
 }
 
 function bindSettingsModal(){
-  $('#app [data-action="closeSettings"]')?.addEventListener('click', () => { state.showSettings = false; render(); });
+  // 모든 closeSettings 요소(배경, X, 취소)에 리스너 부착
+  $$('#app [data-action="closeSettings"]').forEach(el => el.addEventListener('click', () => { state.showSettings = false; render(); }));
   $('#app [data-action="saveCfg"]')?.addEventListener('click', () => {
     cfg = { owner: $('#setOwner').value.trim(), repo: $('#setRepo').value.trim(), token: $('#setToken').value.trim() };
     saveCfg(cfg);
