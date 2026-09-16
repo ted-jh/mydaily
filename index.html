@@ -8,8 +8,8 @@
 <style>
   [x-cloak]{display:none!important}
   *,*::before,*::after{box-sizing:border-box!important}
-  html,body{overflow-x:hidden;width:100%}
-  #app{overflow-x:hidden}
+  html,body{overflow-x:clip;width:100%}
+  #app{overflow-x:clip}
   .card-clip{overflow:hidden}
   .wrap-anywhere{overflow-wrap:anywhere;word-break:break-word}
   .num{font-variant-numeric:tabular-nums}
@@ -421,7 +421,7 @@ function renderMain(){
   const statusColor = { info:'text-slate-300', ok:'text-emerald-300', warn:'text-amber-300', error:'text-rose-300' }[state.statusKind] || 'text-slate-300';
 
   return `
-    <div class="sticky top-0 z-40 -mx-4 px-4 pt-4 pb-3 bg-slate-950/95 backdrop-blur border-b border-white/10">
+    <div class="sticky top-0 z-40 -mx-4 px-4 pt-4 pb-3 bg-slate-950 border-b border-white/10">
       <header class="mb-3">
         <div class="flex flex-wrap items-end justify-between gap-2">
           <div class="min-w-0">
