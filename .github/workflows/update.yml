@@ -3,8 +3,8 @@ name: update-data
 on:
   workflow_dispatch:
   schedule:
-    # KST 매일 아침 06:00 (UTC 21:00 전날, 일~목 = KST 월~금)
-    - cron: "0 21 * * 0-4"
+    # KST 매일 아침 06:00 (UTC 21:00 전날) — 매일 실행
+    - cron: "0 21 * * *"
 
 permissions:
   contents: write
