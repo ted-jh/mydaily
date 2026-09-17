@@ -78,14 +78,23 @@ jobs:
 
           remaining = set(wanted)
           found = {}
+          fetch_errors = 0
 
-          # Look back up to 10 calendar days to skip weekends/holidays.
-          today = dt.date.today()
+          # 한국 시간(KST) 기준 오늘 — GitHub Actions는 UTC로 실행되므로
+          # KST 06:00(UTC 21:00 전날) 실행 시 UTC today는 이틀 전이 됨.
+          # 반드시 KST today를 기준으로 lookback해야 최근 거래일 종가를 가져옴.
+          kst = dt.timezone(dt.timedelta(hours=9))
+          today = dt.datetime.now(kst).date()
+
+          # 최근 거래일 종가를 찾을 때까지 최대 10일 lookback.
+          # 단, 장이 열리지 않은 날(주말/공휴일)은 해당 날짜 데이터가 없으므로
+          # 데이터가 비어있으면 다음 날로 넘어감.
           for n in range(10):
               if not remaining:
                   break
               date = (today - dt.timedelta(days=n)).strftime("%Y%m%d")
 
+              any_data = False
               for market, endpoint in endpoints:
                   try:
                       data = fetch(endpoint, date)
@@ -94,6 +103,7 @@ jobs:
                           rows = [rows]
 
                       for row in rows:
+                          any_data = True
                           code = str(row.get("ISU_CD", "")).strip().upper()
                           if code not in remaining:
                               continue
@@ -111,7 +121,18 @@ jobs:
                           remaining.remove(code)
 
                   except Exception as e:
+                      fetch_errors += 1
                       print(f"{market} {date}: {e}")
+
+              print(f"Lookback {n}: date={date} remaining={len(remaining)} errors={fetch_errors}")
+
+          # 핵심: KRX에서 새 종가를 하나도 못 찾았으면 갱신 실패로 처리
+          # (이전 데이터 그대로 _updated만 바꾸는 것 방지)
+          if not found:
+              raise SystemExit(
+                  f"No prices fetched from KRX ({fetch_errors} errors). "
+                  "prices.json not updated — check KRX_AUTH_KEY and API status."
+              )
 
           old = {}
           old_path = Path("prices.json")
@@ -121,11 +142,7 @@ jobs:
               except Exception:
                   pass
 
-          now = dt.datetime.now(
-              dt.timezone.utc
-          ).astimezone(
-              dt.timezone(dt.timedelta(hours=9))
-          )
+          now = dt.datetime.now(kst)
 
           out = {"_updated": now.strftime("%Y-%m-%d %H:%M")}
 
