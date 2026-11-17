@@ -1,189 +1,189 @@
 {
-  "_updated": "2026-11-16 09:45",
+  "_updated": "2026-11-17 12:23",
   "161510": {
     "name": "PLUS 고배당주",
-    "price": 21780,
-    "date": "20261113",
+    "price": 21985,
+    "date": "20261116",
     "market": "ETF"
   },
   "174900": {
     "name": "앱클론",
-    "price": 22950,
-    "date": "20261113",
+    "price": 23000,
+    "date": "20261116",
     "market": "KOSDAQ"
   },
   "360750": {
     "name": "TIGER 미국S&P500",
-    "price": 25120,
-    "date": "20261113",
+    "price": 24885,
+    "date": "20261116",
     "market": "ETF"
   },
   "367380": {
     "name": "ACE 미국나스닥100",
-    "price": 28680,
-    "date": "20261113",
+    "price": 28040,
+    "date": "20261116",
     "market": "ETF"
   },
   "379800": {
     "name": "KODEX 미국S&P500",
-    "price": 22780,
-    "date": "20261113",
+    "price": 22565,
+    "date": "20261116",
     "market": "ETF"
   },
   "379810": {
     "name": "KODEX 미국나스닥100",
-    "price": 24915,
-    "date": "20261113",
+    "price": 24350,
+    "date": "20261116",
     "market": "ETF"
   },
   "396500": {
     "name": "TIGER 반도체TOP10",
-    "price": 27315,
-    "date": "20261113",
+    "price": 25200,
+    "date": "20261116",
     "market": "ETF"
   },
   "411060": {
     "name": "ACE KRX금현물",
-    "price": 23450,
-    "date": "20261113",
+    "price": 23100,
+    "date": "20261116",
     "market": "ETF"
   },
   "438080": {
     "name": "ACE 미국S&P500미국채혼합50액티브",
-    "price": 13575,
-    "date": "20261113",
+    "price": 13515,
+    "date": "20261116",
     "market": "ETF"
   },
   "438100": {
     "name": "ACE 미국나스닥100미국채혼합50액티브",
-    "price": 14470,
-    "date": "20261113",
+    "price": 14260,
+    "date": "20261116",
     "market": "ETF"
   },
   "441640": {
     "name": "KODEX 미국배당커버드콜액티브",
-    "price": 11880,
-    "date": "20261113",
+    "price": 11840,
+    "date": "20261116",
     "market": "ETF"
   },
   "455850": {
     "name": "SOL AI반도체소부장",
-    "price": 20250,
-    "date": "20261113",
+    "price": 18460,
+    "date": "20261116",
     "market": "ETF"
   },
   "456610": {
     "name": "TIGER 미국달러SOFR금리액티브(합성)",
-    "price": 58490,
-    "date": "20261113",
+    "price": 58495,
+    "date": "20261116",
     "market": "ETF"
   },
   "491010": {
     "name": "TIGER 글로벌AI전력인프라액티브",
-    "price": 18755,
-    "date": "20261113",
+    "price": 17835,
+    "date": "20261116",
     "market": "ETF"
   },
   "494310": {
     "name": "KODEX 반도체레버리지",
-    "price": 40700,
-    "date": "20261113",
+    "price": 33650,
+    "date": "20261116",
     "market": "ETF"
   },
   "005930": {
     "name": "삼성전자",
-    "price": 206000,
-    "date": "20261113",
+    "price": 196800,
+    "date": "20261116",
     "market": "KOSPI"
   },
   "000660": {
     "name": "SK하이닉스",
-    "price": 1216000,
-    "date": "20261113",
+    "price": 1120000,
+    "date": "20261116",
     "market": "KOSPI"
   },
   "0193W0": {
     "name": "KODEX 삼성전자단일종목레버리지",
-    "price": 7000,
-    "date": "20261113",
+    "price": 6305,
+    "date": "20261116",
     "market": "ETF"
   },
   "0193T0": {
     "name": "KODEX SK하이닉스단일종목레버리지",
-    "price": 4530,
-    "date": "20261113",
+    "price": 3845,
+    "date": "20261116",
     "market": "ETF"
   },
   "0177R0": {
     "name": "TIGER 반도체TOP10커버드콜액티브",
-    "price": 7870,
-    "date": "20261113",
+    "price": 7315,
+    "date": "20261116",
     "market": "ETF"
   },
   "069500": {
     "name": "KODEX 200",
-    "price": 83115,
-    "date": "20261113",
+    "price": 79900,
+    "date": "20261116",
     "market": "ETF"
   },
   "0091P0": {
     "name": "TIGER 코리아원자력",
-    "price": 11250,
-    "date": "20261113",
+    "price": 10850,
+    "date": "20261116",
     "market": "ETF"
   },
   "0177N0": {
     "name": "KODEX 삼성전자SK하이닉스채권혼합50",
-    "price": 12370,
-    "date": "20261113",
+    "price": 12010,
+    "date": "20261116",
     "market": "ETF"
   },
   "0183J0": {
     "name": "TIGER 미국우주테크",
-    "price": 6450,
-    "date": "20261113",
+    "price": 6205,
+    "date": "20261116",
     "market": "ETF"
   },
   "0173Y0": {
     "name": "KODEX 미국AI광통신네트워크",
-    "price": 7945,
-    "date": "20261113",
+    "price": 7245,
+    "date": "20261116",
     "market": "ETF"
   },
   "0144L0": {
     "name": "KODEX 미국성장커버드콜액티브",
-    "price": 8775,
-    "date": "20261113",
+    "price": 8610,
+    "date": "20261116",
     "market": "ETF"
   },
   "0111P0": {
     "name": "1Q 미국나스닥100미국채혼합50액티브",
-    "price": 10180,
-    "date": "20261113",
+    "price": 10075,
+    "date": "20261116",
     "market": "ETF"
   },
   "005250": {
     "name": "녹십자홀딩스",
-    "price": 9580,
-    "date": "20261113",
+    "price": 9380,
+    "date": "20261116",
     "market": "KOSPI"
   },
   "0052S0": {
     "name": "1Q 미국S&P500미국채혼합50액티브",
-    "price": 11070,
-    "date": "20261113",
+    "price": 10995,
+    "date": "20261116",
     "market": "ETF"
   },
   "0219E0": {
     "name": "KODEX 200커버드콜액티브",
-    "price": 6150,
-    "date": "20261113",
+    "price": 5870,
+    "date": "20261116",
     "market": "ETF"
   },
   "017670": {
     "name": "SK텔레콤",
     "price": 83900,
-    "date": "20261113",
+    "date": "20261116",
     "market": "KOSPI"
   }
 }
